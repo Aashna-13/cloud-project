@@ -18,16 +18,23 @@ export const AuthProvider = ({ children }) => {
     }
   }, [currentUser]);
 
-  const login = (username, password) => {
-    // Dummy authentication logic
-    if (username === 'admin' && password === 'admin123') {
-      setCurrentUser({ username: 'Admin User', role: 'admin' });
-      return true;
-    } else if (username === 'employee' && password === 'employee123') {
-      setCurrentUser({ username: 'Regular Employee', role: 'employee' });
-      return true;
+  const login = async (username, password) => {
+    try {
+      const response = await fetch('http://localhost:8080/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      if (response.ok) {
+        const user = await response.json();
+        setCurrentUser(user);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error("Login failed", error);
+      return false;
     }
-    return false;
   };
 
   const logout = () => {
