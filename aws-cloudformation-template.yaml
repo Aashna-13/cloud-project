@@ -1,0 +1,115 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Automated Infrastructure for the Intelligent Cloud Application Catalog System (EC2, RDS MySQL, S3)'
+
+Parameters:
+  DBUsername:
+    Description: The database admin account username
+    Type: String
+    MinLength: 4
+    MaxLength: 16
+    AllowedPattern: "[a-zA-Z][a-zA-Z0-9]*"
+    Default: admin
+  DBPassword:
+    Description: The database admin account password
+    Type: String
+    MinLength: 8
+    MaxLength: 41
+    NoEcho: true
+Resources:
+  # VPC Security Group for EC2
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP on 8080 and SSH on 22
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+  
+  # VPC Security Group for RDS
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow database access from anywhere to fix VpcId cross-reference
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 0.0.0.0/0
+
+  # RDS Database Instance
+  CatalogDatabase:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: mysql
+      EngineVersion: "8.0"
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: 20
+      DBName: catalogThemeDB
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      VPCSecurityGroups: 
+        - !GetAtt DBSecurityGroup.GroupId
+      PubliclyAccessible: false
+      MultiAZ: false
+
+  # S3 Bucket for React Frontend
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  # Bucket Policy to allow public read
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Sub 'arn:aws:s3:::${FrontendBucket}/*'
+
+  # EC2 Instance for Spring Boot Backend
+  BackendInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      ImageId: ami-0c7217cdde317cfec # Ubuntu 22.04 LTS in us-east-1 (Change based on your region)
+      SecurityGroups: 
+        - !Ref EC2SecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          apt-get update -y
+          apt-get install openjdk-17-jre-headless -y
+          # When deploying your JAR file, set environment variables to use the RDS endpoint:
+          # export SPRING_DATASOURCE_URL=jdbc:mysql://${CatalogDatabase.Endpoint.Address}:3306/catalogThemeDB
+          # export SPRING_DATASOURCE_USERNAME=${DBUsername}
+          # export SPRING_DATASOURCE_PASSWORD=${DBPassword}
+          # export SPRING_PROFILES_ACTIVE=rds
+
+Outputs:
+  RDSEndpointAddress:
+    Description: Address of the RDS database endpoint
+    Value: !GetAtt CatalogDatabase.Endpoint.Address
+  BackendURL:
+    Description: Public URL of the Spring Boot Backend API
+    Value: !Sub 'http://${BackendInstance.PublicDnsName}:8080/api'
+  FrontendURL:
+    Description: Website URL for the S3 Bucket hosting the React App
+    Value: !GetAtt FrontendBucket.WebsiteURL
